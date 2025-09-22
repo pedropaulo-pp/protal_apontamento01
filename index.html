@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Produtividade</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0/dist/chartjs-plugin-datalabels.min.js"></script>
+
+    <!-- Exportação (Excel, PDF ) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+
+</head>
+<body>
+    
+    <div class="info-cards-container">
+        <div class="info-card">
+            <h3>Colaboradores com Apontamento</h3>
+            <span id="card-com-apontamento" class="card-value">0</span>
+        </div>
+        <div class="info-card">
+            <h3>Colaboradores sem Apontamento</h3>
+            <span id="card-sem-apontamento" class="card-value">0</span>
+        </div>
+        <div class="info-card parado">
+            <h3>Colaboradores Parados</h3>
+            <span id="card-parados" class="card-value">0</span>
+        </div>
+    </div>
+
+    <div class="dashboard-container">
+        <div class="table-container">
+          <table id="tabela-apontamentos">
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>Colaborador</th>
+                  <th>Atividade</th>
+                  <th>Data e Hora</th>
+                  <th>Motivo</th>
+                </tr>
+              </thead>
+              <tbody id="apontamentos-tabela"></tbody>
+            </table>
+        </div>
+        <div class="chart-container">
+            <h3>Distribuição de Atividades</h3>
+            <canvas id="grafico-atividades"></canvas>
+        </div>
+    </div>
+
+    <div class="filter-container">
+        <h3>Filtrar por Período</h3>
+        <label>Data Início:</label>
+        <input type="date" id="filtro-data-inicio">
+        <label>Data Fim:</label>
+        <input type="date" id="filtro-data-fim">
+        <button id="btn-filtrar">Filtrar</button>
+        <button id="btn-limpar">Limpar Filtro</button>
+    </div>
+
+    <div class="export-container">
+        <button id="btn-exportar-excel">Exportar Produtividade (Excel )</button>
+        <button id="btn-exportar-excel-detalhado">Exportar Detalhado (Excel)</button>
+        <button id="btn-exportar-pdf">Exportar Histórico (PDF)</button>
+    </div>
+    
+    <div class="chart-container full-width">
+        <h3>Produtividade por Colaborador</h3>
+        <div class="grafico-scroll-container">
+            <canvas id="grafico-produtividade"></canvas>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+    
+</body>
+</html>
