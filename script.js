@@ -22,7 +22,7 @@ const db = firebase.firestore();
 
 // ===== Utils (MANTIDO) =====
 let dadosDoRelatorio = [];
-const TOTAL_COLABORADORES = 16;
+const TOTAL_COLABORADORES = 40;
 let unsubscribeHistorico = null;
 let animacaoIntervalo = null;
 let corOriginalMaiorFatia = null;
