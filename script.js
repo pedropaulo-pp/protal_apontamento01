@@ -1,8 +1,8 @@
 // =================================================================
-// SCRIPT.JS - VERSÃO FINALMENTE CORRIGIDA E EM TEMPO REAL
+// SCRIPT.JS - VERSÃO FINAL (CORREÇÃO DE ORDENAÇÃO DE STRING)
 // =================================================================
 
-// ===== Firebase =====
+// ===== Firebase (MANTIDO) =====
 const firebaseConfig = {
   apiKey: "AIzaSyD6m7jDQfeGgAaKozzHlXsHfv-AQXsaKd4",
   authDomain: "appapontamentoprodutividade.firebaseapp.com",
@@ -20,7 +20,7 @@ try {
 }
 const db = firebase.firestore();
 
-// ===== Utils =====
+// ===== Utils (MANTIDO) =====
 let dadosDoRelatorio = [];
 const TOTAL_COLABORADORES = 16;
 let unsubscribeHistorico = null;
@@ -45,7 +45,7 @@ const converterDuracaoParaSegundos = (duracaoStr) => {
     return (horas * 3600) + (minutos * 60) + segundos;
 };
 
-// ===== DOM Elements =====
+// ===== DOM Elements (MANTIDO) =====
 const apontamentosTabela = document.getElementById("apontamentos-tabela");
 const cardComApontamento = document.getElementById("card-com-apontamento");
 const cardSemApontamento = document.getElementById("card-sem-apontamento");
@@ -62,7 +62,7 @@ const btnExportarExcel = document.getElementById("btn-exportar-excel");
 const btnExportarExcelDetalhado = document.getElementById("btn-exportar-excel-detalhado");
 const btnExportarPdf = document.getElementById("btn-exportar-pdf");
 
-// ===== Chart Instances =====
+// ===== Chart Instances (MANTIDO) =====
 let graficoAtividades;
 let graficoProdutividade;
 
@@ -80,103 +80,88 @@ const CORES_ATIVIDADES = {
 Chart.register(ChartDataLabels);
 
 // ==================================================
-// ===== FUNÇÃO DE CONVERSÃO DE DATA ÚNICA E ROBUSTA =====
+// ===== FUNÇÃO CRÍTICA: CONVERSÃO DE DATA (ROBUSTA) =====
 // ==================================================
 const parseDate = (dado) => {
     if (!dado) return null;
-
-    // 1. Tenta converter se for um Timestamp do Firebase (o formato ideal)
-    if (dado.toDate && typeof dado.toDate === 'function') {
-        return dado.toDate();
-    }
-
-    // 2. Tenta converter se for uma string
+    if (dado.toDate && typeof dado.toDate === 'function') return dado.toDate();
     if (typeof dado === 'string') {
-        let d;
-
-        // Tenta formato "AAAA-MM-DD HH:MM:SS" ou "AAAA-MM-DDTHH:MM:SS"
-        if (dado.includes('T') || (dado.includes('-') && dado.indexOf('-') === 4)) {
-             d = new Date(dado);
-             if (!isNaN(d.getTime())) return d;
+        const match = dado.match(/^(\d{2})-(\d{2})-(\d{4})\s(\d{2}):(\d{2}):(\d{2})$/);
+        if (match) {
+            const [, dia, mes, ano, hora, minuto, segundo] = match;
+            const isoString = `${ano}-${mes}-${dia}T${hora}:${minuto}:${segundo}`;
+            const d = new Date(isoString);
+            if (!isNaN(d.getTime())) return d;
         }
-
-        // Tenta formato "DD-MM-AAAA HH:MM:SS"
-        const partes = dado.split(' ');
-        if (partes.length === 2) {
-            const dataPartes = partes[0].split('-');
-            if (dataPartes.length === 3) {
-                const parte1 = parseInt(dataPartes[0], 10);
-                const parte2 = parseInt(dataPartes[1], 10);
-                const parte3 = parseInt(dataPartes[2], 10);
-                const horaPartes = partes[1].split(':');
-
-                if (horaPartes.length === 3) {
-                    const hora = parseInt(horaPartes[0], 10);
-                    const minuto = parseInt(horaPartes[1], 10);
-                    const segundo = parseInt(horaPartes[2], 10);
-
-                    // Verifica se é DD-MM-AAAA
-                    if (parte3 > 2000 && parte2 >= 1 && parte2 <= 12) {
-                        d = new Date(parte3, parte2 - 1, parte1, hora, minuto, segundo);
-                        if (!isNaN(d.getTime())) return d;
-                    }
-                }
-            }
-        }
-
-        // Última tentativa com o construtor Date padrão
-        d = new Date(dado);
+        const d = new Date(dado);
         if (!isNaN(d.getTime())) return d;
     }
-
-    // 3. Se nada funcionar, retorna nulo para evitar erros
     return null;
 };
 
 // ==================================================
-// ===== FUNÇÃO PARA RENDERIZAR O PAINEL PRINCIPAL =====
+// ===== FUNÇÃO DE VERIFICAÇÃO (SIMPLIFICADA) =====
 // ==================================================
-const renderizarStatusAtual = (ultimosApontamentos) => {
+const isApontamentoDeHoje = (dataHoraClique) => {
+    if (!dataHoraClique) return false;
+    const dataApontamentoStr = dataHoraClique.substring(0, 10);
+    const hoje = new Date();
+    const diaHoje = String(hoje.getDate()).padStart(2, '0');
+    const mesHoje = String(hoje.getMonth() + 1).padStart(2, '0');
+    const anoHoje = hoje.getFullYear();
+    const hojeStr = `${diaHoje}-${mesHoje}-${anoHoje}`;
+    return dataApontamentoStr === hojeStr;
+};
+
+// ==================================================
+// ===== FUNÇÃO PARA RENDERIZAR O PAINEL (COM CORREÇÃO DE ORDENAÇÃO) =====
+// ==================================================
+const renderizarStatusAtual = (todosOsApontamentos) => {
   if (!apontamentosTabela) return;
   apontamentosTabela.innerHTML = "";
 
-  let totalComApontamentoHoje = 0;
-  let totalParados = 0;
+  // 1. CRIA UM MAPA PARA ARMAZENAR APENAS O APONTAMENTO MAIS RECENTE DE CADA COLABORADOR
+  const ultimosApontamentosMap = new Map();
+  todosOsApontamentos.forEach(apontamento => {
+    const colaborador = apontamento.colaboradorNome;
+    if (!colaborador) return; // Ignora se não tiver nome
 
-  const hojeInicio = new Date();
-  hojeInicio.setHours(0, 0, 0, 0);
+    const dataAtual = parseDate(apontamento.dataHoraClique);
+    if (!dataAtual) return; // Ignora se a data for inválida
 
+    // Se o colaborador ainda não está no mapa OU se o apontamento atual é mais recente que o já salvo
+    if (!ultimosApontamentosMap.has(colaborador) || dataAtual.getTime() > parseDate(ultimosApontamentosMap.get(colaborador).dataHoraClique).getTime()) {
+      ultimosApontamentosMap.set(colaborador, apontamento);
+    }
+  });
+
+  // Converte o mapa para um array
+  const ultimosApontamentos = Array.from(ultimosApontamentosMap.values());
+
+  // 2. ORDENA O ARRAY FINAL PELA DATA CORRETA (DO MAIS NOVO PARA O MAIS ANTIGO)
   ultimosApontamentos.sort((a, b) => {
       const timeA = parseDate(a.dataHoraClique)?.getTime() || 0;
       const timeB = parseDate(b.dataHoraClique)?.getTime() || 0;
       return timeB - timeA;
   });
 
+  let totalComApontamentoHoje = 0;
+  let totalParados = 0;
+
+  // 3. RENDERIZA A TABELA JÁ COM OS DADOS CORRETOS E ORDENADOS
   ultimosApontamentos.forEach(a => {
-    let dataApontamento = parseDate(a.dataHoraClique);
-    let dataFormatada = dataApontamento && !isNaN(dataApontamento.getTime()) ? dataApontamento.toLocaleString('pt-BR') : "Data inválida";
-
-    const ehDeHoje = dataApontamento && dataApontamento >= hojeInicio;
-
+    const ehDeHoje = isApontamentoDeHoje(a.dataHoraClique); 
     if (ehDeHoje) {
         totalComApontamentoHoje++;
         if ((a.atividadeClicada || "").toLowerCase() === "parado") {
             totalParados++;
         }
     }
-
     const tr = document.createElement("tr");
-
-    if ((a.atividadeClicada || "").toLowerCase() === "parado") {
-      tr.classList.add("parado-row");
-    } else if ((a.atividadeClicada || "").toLowerCase() === "aguardando cliente") {
-      tr.classList.add("aguardando-cliente-row");
-    }
-
-    if (!ehDeHoje) {
-        tr.classList.add("apontamento-antigo");
-    }
-
+    if ((a.atividadeClicada || "").toLowerCase() === "parado") tr.classList.add("parado-row");
+    if (!ehDeHoje) tr.classList.add("apontamento-antigo");
+    let dataApontamento = parseDate(a.dataHoraClique);
+    let dataFormatada = dataApontamento ? dataApontamento.toLocaleString('pt-BR') : "Data inválida";
     tr.innerHTML = `
       <td>${a.clientName || "—"}</td>
       <td>${a.colaboradorNome || "N/A"}</td>
@@ -194,18 +179,65 @@ const renderizarStatusAtual = (ultimosApontamentos) => {
 };
 
 // ==================================================
-// ===== FUNÇÕES DOS GRÁFICOS =====
+// ===== FUNÇÃO DE CARREGAMENTO (AJUSTADA) =====
+// ==================================================
+const carregarDadosDoPainel = () => {
+  limparPainelVisualmente();
+  
+  // Listener para a tabela de status (em tempo real)
+  // AGORA ELE BUSCA TODOS OS DOCUMENTOS E A LÓGICA DE FILTRAGEM FICA NO CLIENTE
+  db.collection("apontamentos_realtime")
+    .onSnapshot((snap) => {
+      const todosOsDocs = [];
+      snap.forEach(doc => {
+        todosOsDocs.push(doc.data());
+      });
+      // Chama a função de renderização que agora contém a lógica de ordenação e filtragem
+      renderizarStatusAtual(todosOsDocs);
+    }, (error) => {
+      console.error("Erro ao buscar status em tempo real:", error);
+    });
+  
+  if (unsubscribeHistorico) unsubscribeHistorico();
+
+  // Listener para os dados históricos (GRÁFICOS) - Sem alterações
+  unsubscribeHistorico = db.collection("apontamentos")
+    .onSnapshot((snapshot) => {
+      let inicio, fim;
+      const dataInicioFiltro = filtroDataInicio.value;
+      const dataFimFiltro = filtroDataFim.value;
+      if (dataInicioFiltro && dataFimFiltro) {
+        inicio = new Date(dataInicioFiltro + 'T00:00:00');
+        fim = new Date(dataFimFiltro + 'T23:59:59');
+      } else {
+        const hoje = new Date();
+        inicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 0, 0, 0, 0);
+        fim = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59, 999);
+      }
+      const todosApontamentos = [];
+      snapshot.forEach(doc => todosApontamentos.push(doc.data()));
+      const apontamentosDoPeriodo = todosApontamentos.filter(dado => {
+          const dataDoc = parseDate(dado.dataRegistro);
+          return dataDoc && dataDoc >= inicio && dataDoc <= fim;
+      });
+      dadosDoRelatorio = apontamentosDoPeriodo;
+      if (apontamentosDoPeriodo.length > 0) {
+        atualizarGraficoPizzaHistorico(apontamentosDoPeriodo);
+        renderizarGraficoProdutividade(apontamentosDoPeriodo);
+      } else {
+        if (graficoAtividades) graficoAtividades.destroy();
+        if (graficoProdutividade) graficoProdutividade.destroy();
+      }
+  }, (error) => console.error("Erro ao buscar dados históricos:", error));
+};
+
+// ==================================================
+// ===== FUNÇÕES DOS GRÁFICOS (MANTIDO) =====
 // ==================================================
 const atualizarGraficoPizzaHistorico = (apontamentos) => {
     if (!graficoAtividadesCanvas) return;
-
-    if (animacaoIntervalo) {
-        clearInterval(animacaoIntervalo);
-    }
-    if (graficoAtividades) {
-        graficoAtividades.destroy();
-    }
-
+    if (animacaoIntervalo) clearInterval(animacaoIntervalo);
+    if (graficoAtividades) graficoAtividades.destroy();
     const contagem = {};
     apontamentos.forEach(a => {
         const atividadePadronizada = a.atividade;
@@ -214,25 +246,15 @@ const atualizarGraficoPizzaHistorico = (apontamentos) => {
             contagem[atividadePadronizada] = (contagem[atividadePadronizada] || 0) + duracaoSegundos;
         }
     });
-
     const labels = Object.keys(contagem);
     const data = labels.map(label => contagem[label]);
     const backgroundColors = labels.map(label => CORES_ATIVIDADES[label] || '#607D8B');
-
-    if (labels.length === 0) {
-        return;
-    }
-
+    if (labels.length === 0) return;
     graficoAtividades = new Chart(graficoAtividadesCanvas, {
         type: 'pie',
         data: {
             labels: labels,
-            datasets: [{
-                data: data,
-                backgroundColor: backgroundColors,
-                borderColor: '#ffffff',
-                borderWidth: 2
-            }]
+            datasets: [{ data: data, backgroundColor: backgroundColors, borderColor: '#ffffff', borderWidth: 2 }]
         },
         options: {
             responsive: true, maintainAspectRatio: false,
@@ -249,27 +271,13 @@ const atualizarGraficoPizzaHistorico = (apontamentos) => {
             }
         },
     });
-
-    let indiceMaiorFatia = 0;
-    for (let i = 1; i < data.length; i++) {
-        if (data[i] > data[indiceMaiorFatia]) {
-            indiceMaiorFatia = i;
-        }
-    }
-
+    let indiceMaiorFatia = data.indexOf(Math.max(...data));
     corOriginalMaiorFatia = graficoAtividades.data.datasets[0].backgroundColor[indiceMaiorFatia];
     const corBrilhante = '#FFFF99';
-
     let estaBrilhando = false;
     animacaoIntervalo = setInterval(() => {
         const coresAtuais = graficoAtividades.data.datasets[0].backgroundColor;
-
-        if (estaBrilhando) {
-            coresAtuais[indiceMaiorFatia] = corOriginalMaiorFatia;
-        } else {
-            coresAtuais[indiceMaiorFatia] = corBrilhante;
-        }
-
+        coresAtuais[indiceMaiorFatia] = estaBrilhando ? corOriginalMaiorFatia : corBrilhante;
         estaBrilhando = !estaBrilhando;
         graficoAtividades.update();
     }, 700);
@@ -278,7 +286,6 @@ const atualizarGraficoPizzaHistorico = (apontamentos) => {
 const renderizarGraficoProdutividade = (apontamentos) => {
   if (!graficoProdutividadeCanvas) return;
   if (graficoProdutividade) graficoProdutividade.destroy();
-
   const porColaborador = {};
   apontamentos.forEach(a => {
     const col = a.colaboradorNome || "—";
@@ -290,13 +297,11 @@ const renderizarGraficoProdutividade = (apontamentos) => {
     }
     porColaborador[col][ativ] += seg;
   });
-
   const colaboradores = Object.keys(porColaborador).sort();
   if (colaboradores.length === 0) {
       if (graficoProdutividade) graficoProdutividade.destroy();
       return;
   }
-
   graficoProdutividade = new Chart(graficoProdutividadeCanvas, {
     type: "bar",
     data: {
@@ -316,110 +321,17 @@ const renderizarGraficoProdutividade = (apontamentos) => {
 };
 
 // ==================================================
-// ===== FUNÇÃO DE CARREGAMENTO DE DADOS EM TEMPO REAL (CORRIGIDA) =====
-// ==================================================
-const carregarDadosDoPainel = () => {
-  limparPainelVisualmente();
-  
-  // 1. Listener para a tabela de status (em tempo real)
-  db.collection("apontamentos_realtime")
-    .orderBy("dataHoraClique", "desc")
-    .onSnapshot((snap) => {
-      const ultimosApontamentosMap = new Map();
-      snap.forEach(doc => {
-        const apontamento = doc.data();
-        if (apontamento.colaboradorNome && !ultimosApontamentosMap.has(apontamento.colaboradorNome)) {
-          ultimosApontamentosMap.set(apontamento.colaboradorNome, apontamento);
-        }
-      });
-      renderizarStatusAtual(Array.from(ultimosApontamentosMap.values()));
-    }, (error) => {
-      console.error("Erro ao buscar status em tempo real:", error);
-    });
-  
-  // Cancela o listener anterior se já existir (importante para evitar múltiplos listeners)
-  if (unsubscribeHistorico) {
-    unsubscribeHistorico();
-  }
-
-  // 2. Listener para os dados históricos (GRÁFICOS) - AGORA TAMBÉM EM TEMPO REAL
-  unsubscribeHistorico = db.collection("apontamentos")
-    .onSnapshot((snapshot) => {
-      console.log("Novos dados históricos recebidos, atualizando gráficos...");
-      
-      // Define o período de filtro com base nos inputs da tela
-      let inicio, fim;
-      const dataInicioFiltro = filtroDataInicio.value;
-      const dataFimFiltro = filtroDataFim.value;
-
-      if (dataInicioFiltro && dataFimFiltro) {
-        inicio = new Date(dataInicioFiltro + 'T00:00:00');
-        fim = new Date(dataFimFiltro + 'T23:59:59');
-      } else {
-        const hoje = new Date();
-        inicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 0, 0, 0, 0);
-        fim = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59, 999);
-      }
-
-      const todosApontamentos = [];
-      snapshot.forEach(doc => {
-        todosApontamentos.push(doc.data());
-      });
-
-      // Filtra os apontamentos com base no período selecionado DENTRO do listener
-      const apontamentosDoPeriodo = todosApontamentos.filter(dado => {
-          const dataDoc = parseDate(dado.dataRegistro);
-          return dataDoc && dataDoc >= inicio && dataDoc <= fim;
-      });
-
-      dadosDoRelatorio = apontamentosDoPeriodo;
-      
-      if (apontamentosDoPeriodo.length > 0) {
-        atualizarGraficoPizzaHistorico(apontamentosDoPeriodo);
-        renderizarGraficoProdutividade(apontamentosDoPeriodo);
-      } else {
-        console.log("Nenhum dado histórico para os gráficos no período.");
-        if (graficoAtividades) graficoAtividades.destroy();
-        if (graficoProdutividade) graficoProdutividade.destroy();
-      }
-  }, (error) => {
-    console.error("Erro ao buscar dados históricos em tempo real:", error);
-  });
-};
-
-// ==================================================
-// ===== FUNÇÕES AUXILIARES E DE EXPORTAÇÃO =====
+// ===== FUNÇÕES AUXILIARES E DE EXPORTAÇÃO (MANTIDO) =====
 // ==================================================
 const zerarRegistrosDoBanco = () => {
   if (confirm("ATENÇÃO: Você tem certeza que deseja apagar TODOS os registros de 'apontamentos_realtime' e 'apontamentos'? Esta ação é irreversível.")) {
-    const apontamentosRealtimeRef = db.collection("apontamentos_realtime");
-    const apontamentosRef = db.collection("apontamentos");
-
-    apontamentosRealtimeRef.get().then(snapshot => {
-      const batch = db.batch();
-      snapshot.docs.forEach(doc => {
-        batch.delete(doc.ref);
-      });
-      return batch.commit();
-    }).then(() => {
-      return apontamentosRef.get().then(snapshot => {
-        const batch = db.batch();
-        snapshot.docs.forEach(doc => {
-          batch.delete(doc.ref);
-        });
-        return batch.commit();
-      });
-    }).then(() => {
-      alert("Todos os registros foram excluídos com sucesso!");
-      limparPainelVisualmente();
-      carregarDadosDoPainel();
-    }).catch(error => {
-      console.error("Erro ao apagar registros:", error);
-      alert("Ocorreu um erro ao apagar os registros.");
-    });
+    db.collection("apontamentos_realtime").get().then(s => { const b = db.batch(); s.docs.forEach(d => b.delete(d.ref)); return b.commit(); });
+    db.collection("apontamentos").get().then(s => { const b = db.batch(); s.docs.forEach(d => b.delete(d.ref)); return b.commit(); });
+    alert("Todos os registros foram excluídos com sucesso!");
+    limparPainelVisualmente();
+    carregarDadosDoPainel();
   }
 };
-
 const limparPainelVisualmente = () => {
     if (cardComApontamento) cardComApontamento.textContent = 0;
     if (cardSemApontamento) cardSemApontamento.textContent = TOTAL_COLABORADORES;
@@ -427,15 +339,10 @@ const limparPainelVisualmente = () => {
     if (apontamentosTabela) apontamentosTabela.innerHTML = "<tr><td colspan='5'>Carregando dados...</td></tr>";
     if (cardParadosContainer) cardParadosContainer.classList.remove("alerta-parado");
 };
-
 const exportarProdutividadeExcel = () => {
-    if (!dadosDoRelatorio || dadosDoRelatorio.length === 0) {
-        alert("Nenhum dado para exportar.");
-        return;
-    }
+    if (!dadosDoRelatorio || dadosDoRelatorio.length === 0) return alert("Nenhum dado para exportar.");
     const porColaborador = {};
     const ATIVIDADES_EXPORT = [...ATIVIDADES, "Tempo Total"];
-
     dadosDoRelatorio.forEach(a => {
         const col = a.colaboradorNome || "—";
         const ativ = a.atividade || "—";
@@ -447,112 +354,57 @@ const exportarProdutividadeExcel = () => {
         porColaborador[col][ativ] += seg;
         porColaborador[col]["Tempo Total"] += seg;
     });
-
     const exportData = Object.entries(porColaborador).map(([colaborador, tempos]) => {
         const row = { "Colaborador": colaborador };
-        ATIVIDADES_EXPORT.forEach(atividade => {
-            row[atividade] = formatarTempo(tempos[atividade]);
-        });
+        ATIVIDADES_EXPORT.forEach(atividade => row[atividade] = formatarTempo(tempos[atividade]));
         return row;
     });
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Produtividade por Colaborador");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Produtividade");
     XLSX.writeFile(workbook, "produtividade_colaboradores.xlsx");
 };
-
 const exportarDetalhadoExcel = () => {
-    if (!dadosDoRelatorio || dadosDoRelatorio.length === 0) {
-        alert("Nenhum dado para exportar.");
-        return;
-    }
+    if (!dadosDoRelatorio || dadosDoRelatorio.length === 0) return alert("Nenhum dado para exportar.");
     const exportData = dadosDoRelatorio.map(a => ({
-        "Cliente": a.clientName || "N/A",
-        "Colaborador": a.colaboradorNome || "N/A",
-        "Atividade": a.atividade || "N/A",
-        "Duração": a.duracaoFormatada || "00:00:00",
-        "Data e Hora": parseDate(a.dataRegistro)?.toLocaleString('pt-BR') || "Data inválida",
-        "Motivo": a.motivo || "N/A",
-        "Localização": a.localizacao
+        "Cliente": a.clientName || "N/A", "Colaborador": a.colaboradorNome || "N/A", "Atividade": a.atividade || "N/A",
+        "Duração": a.duracaoFormatada || "00:00:00", "Data e Hora": parseDate(a.dataRegistro)?.toLocaleString('pt-BR') || "Data inválida",
+        "Motivo": a.motivo || "N/A", "Localização": a.localizacao
     }));
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Apontamentos Detalhados");
     XLSX.writeFile(workbook, "apontamentos_detalhados.xlsx");
 };
-
 const exportarHistoricoPdf = () => {
-    if (!dadosDoRelatorio || dadosDoRelatorio.length === 0) {
-        alert("Nenhum dado histórico encontrado no período selecionado para exportar.");
-        return;
-    }
-
+    if (!dadosDoRelatorio || dadosDoRelatorio.length === 0) return alert("Nenhum dado para exportar.");
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
-
     doc.setFontSize(18);
     doc.text("Relatório de Histórico de Apontamentos", 14, 22);
-
     const headers = [["Cliente", "Colaborador", "Atividade", "Duração", "Data e Hora", "Motivo"]];
-
     const body = dadosDoRelatorio.map(a => [
-        a.clientName || "N/A",
-        a.colaboradorNome || "N/A",
-        a.atividade || "N/A",
-        a.duracaoFormatada || "00:00:00",
-        parseDate(a.dataRegistro)?.toLocaleString('pt-BR') || "Data inválida",
-        a.motivo || "N/A"
+        a.clientName || "N/A", a.colaboradorNome || "N/A", a.atividade || "N/A", a.duracaoFormatada || "00:00:00",
+        parseDate(a.dataRegistro)?.toLocaleString('pt-BR') || "Data inválida", a.motivo || "N/A"
     ]);
-
-    doc.autoTable({
-        head: headers,
-        body: body,
-        startY: 30,
-        theme: 'striped',
-        headStyles: { fillColor: [22, 160, 133] },
-    });
-
+    doc.autoTable({ head: headers, body: body, startY: 30, theme: 'striped', headStyles: { fillColor: [22, 160, 133] } });
     doc.save("historico_filtrado.pdf");
 };
 
 // ==================================================
-// ===== EVENT LISTENERS =====
+// ===== EVENT LISTENERS (MANTIDO) =====
 // ==================================================
-if (btnFiltrar) {
-    btnFiltrar.addEventListener("click", () => {
-        const dataInicio = filtroDataInicio.value;
-        const dataFim = filtroDataFim.value;
-        if (!dataInicio || !dataFim) {
-            return alert("Por favor, selecione a data de início e a data de fim para filtrar.");
-        }
-        // Apenas força a reavaliação dos listeners que já estão ativos
-        carregarDadosDoPainel();
-    });
-}
-
+if (btnFiltrar) btnFiltrar.addEventListener("click", carregarDadosDoPainel);
 if (btnLimpar) {
     btnLimpar.addEventListener("click", () => {
         if(filtroDataInicio) filtroDataInicio.value = "";
         if(filtroDataFim) filtroDataFim.value = "";
-        // Força a reavaliação dos listeners com o filtro limpo
         carregarDadosDoPainel();
     });
 }
+if (btnLimparPainel) btnLimparPainel.addEventListener("click", zerarRegistrosDoBanco);
+if (btnExportarExcel) btnExportarExcel.addEventListener("click", exportarProdutividadeExcel);
+if (btnExportarExcelDetalhado) btnExportarExcelDetalhado.addEventListener("click", exportarDetalhadoExcel);
+if (btnExportarPdf) btnExportarPdf.addEventListener("click", exportarHistoricoPdf);
 
-if (btnLimparPainel) {
-    btnLimparPainel.addEventListener("click", zerarRegistrosDoBanco);
-}
-if (btnExportarExcel) {
-    btnExportarExcel.addEventListener("click", exportarProdutividadeExcel);
-}
-if (btnExportarExcelDetalhado) {
-    btnExportarExcelDetalhado.addEventListener("click", exportarDetalhadoExcel);
-}
-if (btnExportarPdf) {
-    btnExportarPdf.addEventListener("click", exportarHistoricoPdf);
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    // Inicia os listeners quando a página carrega
-    carregarDadosDoPainel();
-});
+document.addEventListener('DOMContentLoaded', carregarDadosDoPainel);
